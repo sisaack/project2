@@ -46,76 +46,147 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Sarah Isaack sji259
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+  The dataset I will be using joins two separate datasets both about different aspects of Halloween candy. The first original dataset came from an article regarding each of the 50 U.S. states' favorite Halloween candy and focuses on which candy is each state's favorite as well as the number of pounds purchased by each state. The second original dataset came from the fivethirtyeight library already available on R and focuses on the flavors present in each listed candy as well as their sugar percentiles, price percentiles, and how often the candy won a popularity poll when pitted against the other candies. 
+  In the joined dataset, there are 51 observations for each U.S. state including Washington D.C. and 15 different variables. There are first binary variables for flavor which show if the candy has a chocolate, fruity, caramel, peanuty/almondy, nougat, or crisped rice wafer flavor, or a combination of these. Then, there is the hard variable which describes the candy's texture. Next, the bar variable explains if the candy comes in a bar shape, and pluribus explains if the candy is one of multiple in the package or if it stands alone. The sugarpercent and pricepercent variables show the percentile of sugar and price respectively compared to the rest of the candies, and the winpercent shows how often the candy won in the 269,000 matchups performed. Lastly, state is the state where the candy type is the most popular and pounds is how many pounds of candy were bought by the previously mentioned state. 
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
-
-# if your dataset needs tidying, do so here
-
-# any other code here
+library(readr)
+state_candy <- read_csv("/stor/home/sji259/project1/state_candy.csv")
+library(fivethirtyeight)
+candy_rankings <- candy_rankings
+joined_candy <- right_join(candy_rankings, state_candy, by=c("competitorname"="Top Candy"))
 ```
 
 ### Cluster Analysis
 
 ```{R}
 library(cluster)
-# clustering code here
+library(GGally)
+pam_dat<-joined_candy%>%select(sugarpercent,pricepercent, winpercent, Pounds)
+sil_width<-vector()
+for(i in 2:10){  
+  pam_fit <- pam(pam_dat, k = i)  
+  sil_width[i] <- pam_fit$silinfo$avg.width  
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+
+pam_candy <- pam_dat %>% pam(k=2)
+candy_clust<-pam_dat %>% mutate(cluster=as.factor(pam_candy$clustering))
+ggpairs(candy_clust, columns=1:4, aes(color=cluster))
+
+pam_candy$silinfo$avg.width
+plot(pam_candy, which=2)
+
 ```
 
-Discussion of clustering here
-    
+  I chose to perform PAM clustering on all 4 numeric variables that are present in the dataset. After the variables were chosen, the first step is to find the largest silhouette width in order to find out how many clusters should be used. It was found that using 2 clusters produced the highest silhouette width, so 2 clusters will be used. The next step is to run the analysis and visualize the results in the plots, as seen above. 
+  After analyzing the ggpairs plot and looking at the relationship between the clusters, some distinct differences come up. It appears that there is one cluster (light blue) that includes candies that many pounds were purchased of, seemed to be in a lower sugar percentile and price percentile, and had a mid to high win percentage. The second cluster (red) includes candies that fewer pounds were purchased of, seemed to be in a higher sugar percentile and price percentile, but had varying ranges of win percentage. The average silhouette width was seen to be 0.8522121 which means a strong clustering structure has been found, or rather these clusters accurately represent the data. 
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+pca_dat<-joined_candy %>% select_if(is.numeric) %>% scale %>% na.omit
+pca_candy<-princomp(pca_dat)
+summary(pca_candy, loadings=T)
+
+eigval<-pca_candy$sdev^2 
+varprop=round(eigval/sum(eigval), 2)
+ggplot() + geom_bar(aes(y = varprop, x = 1:4), stat = "identity") + 
+    geom_text(aes(x = 1:4, y = varprop, label = round(varprop, 
+        2)))
 ```
 
-Discussions of PCA here. 
+Before performing my PCA, I first scaled the data, and had to omit some NAs that were present in my dataset. Then, I used the princomp function to perform the PCA and created a ggplot to analyze the proportion of total variance that each principal component explained. This plot showed that PCs 1-4 accounted for 100% of the variance in the data, so I will be using all four. After analyzing all four PCs, some relationships were established. The analysis showed that if a candy scores highly on PC 1, then their sugar percentile, price percentile, win percentage, and amount purchased in pounds will be higher and would be lower if the candy scored poorly on PC 1. If a candy scores highly on PC 2, then sugar percentile and price percentile will be slightly higher, win percentage will be slightly lower, and the amount purchased in pounds will be significantly lower, and vice versa if PC 2 is scored lowly on. If a candy scores highly on PC 3, then its sugar percentile and amount purchased in pounds will increase, however its win percentage will decrease, which again would become the opposite if PC 3 is scored lowly on. Lastly, if a candy scores highly on PC 4, then its sugar percentile and win percentage will increase while its price percentile decreases, and again vice versa for in the candy scored lowly on PC 4. 
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+joined_candy %>% na.omit -> glm_data
+logistic_fit <- glm(chocolate=="TRUE" ~ sugarpercent + pricepercent + winpercent + Pounds, data=glm_data, family="binomial")
+
+prob_candy <- predict(logistic_fit)
+score <- predict(logistic_fit, type="response")
+score %>% round(3)
+
+y <- glm_data$chocolate
+y_hat <- ifelse(score>0.5, "TRUE", "FALSE")
+table(actual=y, predicted = y_hat) %>% addmargins
+
+class_diag(prob_candy, glm_data$chocolate, positive="TRUE")
 ```
 
 ```{R}
-# cross-validation of linear classifier here
+set.seed(1234)
+k=5
+data<-sample_frac(glm_data) 
+folds <- rep(1:k, length.out=nrow(data)) 
+
+diags<-NULL
+
+i=1
+for(i in 1:k){
+train<-data[folds!=i,] 
+test<-data[folds==i,] 
+truth<-test$chocolate
+
+
+fit <- glm(chocolate=="TRUE" ~ sugarpercent + pricepercent + winpercent + Pounds, data=train, family="binomial")
+probs <- predict(fit, newdata = test, type="response")
+
+diags<-rbind(diags,class_diag(probs,truth, positive="TRUE")) }
+summarize_all(diags,mean)
 ```
 
-Discussion here
+I decided to use logistic regression to analyze my data. The first step was to remove some NAs in my data that would have not allowed the glm to run. Next, I created the logistic fit and used it to predict the identities of each candy for whether or not they included chocolate based on the four numeric variables, sugar percentile, price percentile, win percentage, and pounds purchased. I then created a confusion matrix seen above which shows that there are 19 true positives, 1 false positive, 16 true negatives, and 3 false negatives. Lastly, the class diag function was used to analyze aspects of this logistic regression model. This function showed that the accuracy was 0.8974, or that 89.74% of candies were classified correctly. It showed that the sensitivity was 0.8636, or that 86.36% of candies with chocolate were classified correctly. The specificity was found to be 0.9412, or 94.12% of the candies without chocolate were classified correctly. The precision was found to be 0.95, or 95% of candies that were predicted to have chocolate did have chocolate. Lastly, the AUC was found to be 0.8583 which means this model is doing a pretty good job at predicting the data. 
+
+After analyzing the logistic regression model, I performed a cross validation on my data. Using 5 folds due to a smaller dataset, I got an AUC of 0.72668, which is lower than the AUC was for the logistic regression. Because the AUC decreased by about 0.14, I would say this data does show signs of overfitting, even if the cross validated predictor is performing fairly well. During this cross-validation it was also observed that the accuracy, sensitivity, specificity, and precision decreased alongside the AUC as well.
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
-# non-parametric classifier code here
+knn_fit_candy <- knn3(factor(chocolate=="TRUE",levels=c("TRUE","FALSE")) ~ sugarpercent + pricepercent + winpercent + Pounds, data=glm_data, k=5)
+y_hat_candy <- predict(knn_fit_candy,glm_data)
+class_diag(y_hat_candy[,1], glm_data$chocolate, positive="TRUE")
+
+table(actual=y, predicted = factor(y_hat_candy[,1]>.5, levels=c("TRUE","FALSE"))) %>% addmargins
 ```
 
 ```{R}
-# cross-validation of np classifier here
+glm_data %>% mutate(chocolate = ifelse(chocolate=="TRUE", 1,0)) -> glm_data2
+set.seed(1234)
+cv <- trainControl(method="cv", number = 5, classProbs = T, savePredictions = T)
+fit <- train(chocolate~ sugarpercent + pricepercent + winpercent + Pounds, data=glm_data2, trControl=cv, method="knn")
+class_diag(fit$pred$pred, fit$pred$obs, positive=1)
 ```
 
-Discussion
+I chose to use k nearest neighbors to perform a non-parametirc classification. I first used all of the data to predict whether each specific candy contained chocolate as a flavor using this KNN method. After predicting the fit and using the class diag function, the AUC was found to be 0.7072, which is lower than the AUC was for the linear regression model used before, and it means this model is doing a fair job at predicting the identity of each candy in regards to chocolate. When a confusion matrix was made, it was found that there were 16 true positives, 8 false positives, 9 true negatives, and 6 false negatives. 
+
+Next, cross validation was done on the data. After performing the cross validation, the AUC dropped to 0.5206, so it performing badly as a predictor. Because the AUC dropped so much in the CV, this model does have signs of overfitting. When compared to the linear classifier, the non-parametric classifier does much worse in both the normal prediction process as well as in the cross validation.  
 
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+candy_fit<-lm(Pounds~competitorname+State,data=glm_data)
+candy_yhat<-predict(candy_fit)
+
+mean((glm_data$Pounds-candy_yhat)^2)
 ```
 
 ```{R}
-# cross-validation of regression model here
+set.seed(1234)
+cv <- trainControl(method="cv", number = 5, classProbs = T, savePredictions = T)
+fit <- train(Pounds ~ competitorname+State, data=glm_data2, trControl=cv, method="rpart")
+min(fit$results$RMSE)^2
 ```
 
-Discussion
+When fitting the linear regression model to the dataset, I chose to predict the amount of pounds that were bought of a certain candy by the name of the candies and the state where each candy was most popular. This ended up having an extremely low MSE at 1.09x10^-19, so it was a great predictor of the number of pounds bought. However, when cross validation was performed, the MSE became extremely large at 3.92x10^10. This means that this linear regression model shows extreme signs of overfitting and could not be used to accurately predict outside data. 
 
 ### Python 
 
@@ -124,14 +195,17 @@ library(reticulate)
 ```
 
 ```{python}
-# python code here
+candy_data=r.glm_data
+sum(candy_data['chocolate'])/len(candy_data['chocolate'])
+propchoc=0.5641025641025641
 ```
 
-Discussion
+```{R}
+py$propchoc
+```
 
-### Concluding Remarks
+In python I found the proportion of all candies that hada chocolate flavor by taking the sum of all "true" chocolate candies and dividin it by all listed candies. I then assigned this value to "propchoc" in python and was able to retrieve it in r by using reticulate which allows the interplay between r and python. 
 
-Include concluding remarks here, if any
 
 
 
